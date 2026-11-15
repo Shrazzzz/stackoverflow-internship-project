@@ -32,11 +32,77 @@ const plans = [
   },
 ];
 
+interface RazorpayPaymentResponse {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+}
+
+interface RazorpayOptions {
+  key: string;
+  amount: number;
+  currency: string;
+  name: string;
+  description: string;
+  order_id: string;
+  handler: (response: RazorpayPaymentResponse) => void;
+  modal?: {
+    ondismiss?: () => void;
+  };
+  theme?: {
+    color: string;
+  };
+}
+
+interface RazorpayInstance {
+  open: () => void;
+  on: (
+    event: string,
+    callback: (response: {
+      error?: { description?: string };
+    }) => void
+  ) => void;
+}
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: RazorpayOptions) => RazorpayInstance;
+  }
+}
+
+function loadRazorpayScript(): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (window.Razorpay) {
+      resolve(true);
+      return;
+    }
+
+    const existingScript = document.querySelector(
+      'script[src="https://checkout.razorpay.com/v1/checkout.js"]'
+    );
+
+    if (existingScript) {
+      existingScript.addEventListener("load", () =>
+        resolve(!!window.Razorpay)
+      );
+      existingScript.addEventListener("error", () => resolve(false));
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.onload = () => resolve(!!window.Razorpay);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+}
+
 export default function SubscriptionPage() {
   const [currentPlan, setCurrentPlan] = useState("Free");
   const [questionsUsed, setQuestionsUsed] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [payingPlan, setPayingPlan] = useState("");
 
   useEffect(() => {
     const loadSubscription = async () => {
@@ -110,6 +176,118 @@ export default function SubscriptionPage() {
 
     loadSubscription();
   }, []);
+
+  const handleSubscribe = async (planName: string) => {
+    try {
+      setPayingPlan(planName);
+
+      const scriptLoaded = await loadRazorpayScript();
+
+      if (!scriptLoaded || !window.Razorpay) {
+        throw new Error("Could not load Razorpay checkout. Please try again.");
+      }
+
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError || !session) {
+        throw new Error("Please log in again before making a payment.");
+      }
+
+      // Create Razorpay order on the server
+      const orderResponse = await fetch("/api/create-order", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ plan: planName }),
+      });
+
+      const orderData = await orderResponse.json();
+
+      if (!orderResponse.ok) {
+        throw new Error(orderData.error || "Could not create payment order.");
+      }
+
+      const options: RazorpayOptions = {
+        key: orderData.key_id,
+        amount: orderData.amount,
+        currency: orderData.currency,
+        name: "Stackoverflow Internship Project",
+        description: `${planName} Subscription`,
+        order_id: orderData.order_id,
+
+        handler: async (response) => {
+          try {
+            const verificationResponse = await fetch(
+              "/api/verify-payment",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${session.access_token}`,
+                },
+                body: JSON.stringify(response),
+              }
+            );
+
+            const verificationData =
+              await verificationResponse.json();
+
+            if (!verificationResponse.ok) {
+              throw new Error(
+                verificationData.error || "Payment verification failed."
+              );
+            }
+
+            setCurrentPlan(planName);
+            alert(verificationData.message);
+          } catch (verificationError) {
+            console.error(verificationError);
+            alert(
+              verificationError instanceof Error
+                ? verificationError.message
+                : "Payment verification failed."
+            );
+          } finally {
+            setPayingPlan("");
+          }
+        },
+
+        modal: {
+          ondismiss: () => {
+            setPayingPlan("");
+          },
+        },
+
+        theme: {
+          color: "#2563eb",
+        },
+      };
+
+      const checkout = new window.Razorpay(options);
+
+      checkout.on("payment.failed", (response) => {
+        alert(
+          response.error?.description || "Payment failed. Please try again."
+        );
+        setPayingPlan("");
+      });
+
+      checkout.open();
+    } catch (err) {
+      console.error("Payment error:", err);
+      alert(
+        err instanceof Error
+          ? err.message
+          : "Something went wrong. Please try again."
+      );
+      setPayingPlan("");
+    }
+  };
 
   const dailyLimit =
     currentPlan === "Gold"
@@ -203,35 +381,35 @@ export default function SubscriptionPage() {
 
               <button
                 type="button"
-                disabled={loading || !!error}
+                disabled={loading || !!error || payingPlan !== ""}
                 onClick={() => {
                   if (plan.name === currentPlan) {
                     alert("This is your current plan.");
                   } else if (plan.name === "Free") {
-                    alert("You are already using the Free plan unless your subscription changes.");
-                  } else {
                     alert(
-                      "Payment integration for the " +
-                        plan.name +
-                        " plan is coming soon. Your plan has not been changed."
+                      "Your Free plan will be available when your paid subscription expires."
                     );
+                  } else {
+                    handleSubscribe(plan.name);
                   }
                 }}
                 className="mt-8 w-full rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
               >
-                {plan.name === currentPlan
+                {payingPlan === plan.name
+                  ? "Processing..."
+                  : plan.name === currentPlan
                   ? "Current Plan"
                   : plan.name === "Free"
                   ? "Free Plan"
-                  : "Payment Coming Soon"}
+                  : "Subscribe Now"}
               </button>
             </div>
           ))}
         </div>
 
         <p className="mt-8 text-center text-sm text-gray-500">
-          Paid subscription activation requires successful payment
-          verification.
+          Payments are available between 10:00 AM and 11:00 AM IST.
+          Paid plans activate only after successful server-side payment verification.
         </p>
       </div>
     </main>
