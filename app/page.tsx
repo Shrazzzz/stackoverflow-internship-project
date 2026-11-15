@@ -1,12 +1,59 @@
 
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Navbar from "../components/ui/Navbar";
 import Link from "next/link";
+import { supabase } from "@/lib/supabaseClient";
+
+type Question = {
+  id: number;
+  title: string;
+  description: string;
+  tags: string[] | string | null;
+};
 
 export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchQuestions() {
+      const { data, error } = await supabase
+        .from("questions")
+        .select("id, title, description, tags")
+        .order("created_at", { ascending: false })
+        .limit(5);
+
+      if (error) {
+        console.error("Could not load questions:", error.message);
+      } else {
+        setQuestions(data || []);
+      }
+
+      setLoading(false);
+    }
+
+    fetchQuestions();
+  }, []);
+
+  function formatTags(tags: Question["tags"]): string[] {
+    if (Array.isArray(tags)) return tags;
+
+    if (typeof tags === "string") {
+      try {
+        const parsed = JSON.parse(tags);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {
+        return tags.split(",").map((tag) => tag.trim()).filter(Boolean);
+      }
+
+      return [];
+    }
+
+    return [];
+  }
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -16,18 +63,18 @@ export default function Home() {
         {menuOpen && (
           <aside className="w-56 bg-white min-h-screen p-5 border-r">
             <nav className="flex flex-col gap-5">
-               <a href="/" className="hover:text-blue-600">Home</a>
-               <a href="/questions" className="hover:text-blue-600">Questions</a>
-               <a href="/tags" className="hover:text-blue-600">Tags</a>
-               <a href="/users" className="hover:text-blue-600">Users</a>
-               <a href="/public-feed" className="hover:text-blue-600">Public Feed</a>
-               <a href="/subscription" className="hover:text-blue-600">Subscription Plans</a>
+              <Link href="/">Home</Link>
+              <Link href="/questions">Questions</Link>
+              <Link href="/tags">Tags</Link>
+              <Link href="/users">Users</Link>
+              <Link href="/public-feed">Public Feed</Link>
+              <Link href="/subscription">Subscription Plans</Link>
             </nav>
           </aside>
         )}
 
         <main className="flex-1 max-w-5xl mx-auto p-8">
-          <div className="flex justify-between items-center mb-8">
+          <div className="flex justify-between items-center mb-8 gap-4">
             <div>
               <h1 className="text-3xl font-bold">All Questions</h1>
               <p className="text-gray-500 mt-2">
@@ -36,10 +83,10 @@ export default function Home() {
             </div>
 
             <Link
-                 href="/ask-question"
-                 className="bg-blue-600 text-white px-5 py-3 rounded-lg"
+              href="/ask-question"
+              className="bg-blue-600 text-white px-5 py-3 rounded-lg hover:bg-blue-700"
             >
-             Ask Question
+              Ask Question
             </Link>
           </div>
 
@@ -53,21 +100,58 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="bg-white rounded-xl border p-6">
-            <h2 className="text-xl font-semibold">
-              How do I get started with React.js?
+          <div className="mb-5">
+            <h2 className="text-xl font-bold text-gray-800 mb-4">
+              Recent Questions
             </h2>
 
-            <p className="text-gray-600 mt-3">
-              I am learning React and want to understand components,
-              props and state. Can someone explain?
-            </p>
+            {loading ? (
+              <div className="bg-white rounded-xl border p-6 text-gray-500">
+                Loading questions...
+              </div>
+            ) : questions.length === 0 ? (
+              <div className="bg-white rounded-xl border p-6 text-gray-600">
+                No questions available yet. Be the first to ask!
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {questions.map((question) => (
+                  <div
+                    key={question.id}
+                    className="bg-white rounded-xl border p-6 hover:shadow-md transition"
+                  >
+                    <Link
+                      href={`/questions/${question.id}`}
+                      className="text-xl font-semibold text-blue-700 hover:underline"
+                    >
+                      {question.title}
+                    </Link>
 
-            <div className="flex gap-5 text-sm text-gray-500 mt-5">
-              <span>12 votes</span>
-              <span>4 answers</span>
-              <span>react · javascript</span>
-            </div>
+                    <p className="text-gray-600 mt-3">
+                      {question.description}
+                    </p>
+
+                    <div className="flex flex-wrap gap-2 mt-4">
+                      {formatTags(question.tags).map((tag, index) => (
+                        <span
+                          key={`${tag}-${index}`}
+                          className="rounded-md bg-blue-100 px-3 py-1 text-sm text-blue-700"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <Link
+              href="/questions"
+              className="inline-block mt-5 text-blue-600 font-semibold hover:underline"
+            >
+              View All Questions →
+            </Link>
           </div>
         </main>
       </div>
