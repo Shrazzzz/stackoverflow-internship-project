@@ -22,8 +22,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: { user }, error: authError } =
-      await supabaseAdmin.auth.getUser(token);
+    const {
+      data: { user },
+      error: authError,
+    } = await supabaseAdmin.auth.getUser(token);
 
     if (authError || !user) {
       return NextResponse.json(
@@ -32,7 +34,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Accept only supported plans
+    // Validate subscription plan
     const { plan } = await request.json();
     const amount = planPrices[plan];
 
@@ -43,28 +45,22 @@ export async function POST(request: Request) {
       );
     }
 
-    // Allow payments only between 10 AM and 11 AM IST
-    const istTime = new Intl.DateTimeFormat("en-GB", {
-      timeZone: "Asia/Kolkata",
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    }).format(new Date());
+    // TEMPORARILY DISABLED: 10 AM–11 AM payment restriction
 
-    const [hour, minute] = istTime.split(":").map(Number);
-
-    if (hour !== 10) {
-      return NextResponse.json(
-        { error: "Payments are available only between 10:00 AM and 11:00 AM IST." },
-        { status: 403 }
-      );
-    }
+    // Safe Razorpay configuration diagnostics
+    console.log("Razorpay config check:", {
+      keyIdPresent: !!process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+      keyIdPrefix: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID?.slice(0, 8),
+      secretPresent: !!process.env.RAZORPAY_KEY_SECRET,
+      secretLength: process.env.RAZORPAY_KEY_SECRET?.length,
+    });
 
     const razorpay = new Razorpay({
       key_id: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!,
       key_secret: process.env.RAZORPAY_KEY_SECRET!,
     });
 
+    // Create Razorpay order
     const order = await razorpay.orders.create({
       amount: amount * 100,
       currency: "INR",
@@ -74,6 +70,8 @@ export async function POST(request: Request) {
         plan_name: plan,
       },
     });
+
+    console.log("Razorpay order created:", order.id);
 
     return NextResponse.json({
       order_id: order.id,

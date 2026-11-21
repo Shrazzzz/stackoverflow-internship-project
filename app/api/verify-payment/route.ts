@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import Razorpay from "razorpay";
 import { createHmac, timingSafeEqual } from "crypto";
+import { Resend } from "resend";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 const planPrices: Record<string, number> = {
@@ -12,7 +13,6 @@ const planPrices: Record<string, number> = {
 
 export async function POST(request: Request) {
   try {
-    // Verify the logged-in user
     const token = request.headers
       .get("authorization")
       ?.replace("Bearer ", "");
@@ -58,7 +58,6 @@ export async function POST(request: Request) {
       throw new Error("Razorpay secret is not configured.");
     }
 
-    // Verify Razorpay signature
     const expectedSignature = createHmac("sha256", secret)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest();
@@ -83,7 +82,6 @@ export async function POST(request: Request) {
       key_secret: secret,
     });
 
-    // Verify order and payment directly with Razorpay
     const order = await razorpay.orders.fetch(razorpay_order_id);
     const payment = await razorpay.payments.fetch(razorpay_payment_id);
 
@@ -106,7 +104,8 @@ export async function POST(request: Request) {
       );
     }
 
-        const { error: activationError } = await supabaseAdmin.rpc(
+    // Activate subscription
+    const { error: activationError } = await supabaseAdmin.rpc(
       "activate_subscription_after_payment",
       {
         p_user_id: user.id,
@@ -124,8 +123,49 @@ export async function POST(request: Request) {
       );
     }
 
+    // Send invoice email
+    let emailSent = false;
+
+    if (
+      user.email &&
+      process.env.RESEND_API_KEY &&
+      process.env.RESEND_FROM_EMAIL
+    ) {
+      try {
+        const resend = new Resend(process.env.RESEND_API_KEY);
+
+        const { error: emailError } = await resend.emails.send({
+          from: process.env.RESEND_FROM_EMAIL,
+          to: user.email,
+          subject: `${plan} Subscription Payment Invoice`,
+          html: `
+            <div style="font-family: Arial, sans-serif; padding: 20px;">
+              <h2>Payment Successful!</h2>
+              <p>Hello,</p>
+              <p>Your subscription has been activated successfully.</p>
+              <h3>Payment Invoice</h3>
+              <p><strong>Plan:</strong> ${plan}</p>
+              <p><strong>Amount:</strong> ₹${expectedAmount}</p>
+              <p><strong>Payment ID:</strong> ${razorpay_payment_id}</p>
+              <p><strong>Duration:</strong> 30 days</p>
+              <p>Thank you for subscribing!</p>
+            </div>
+          `,
+        });
+
+        if (emailError) {
+          console.error("Invoice email error:", emailError);
+        } else {
+          emailSent = true;
+        }
+      } catch (emailError) {
+        console.error("Invoice email error:", emailError);
+      }
+    }
+
     return NextResponse.json({
       success: true,
+      emailSent,
       message: `${plan} plan activated successfully for 30 days.`,
     });
   } catch (error) {
