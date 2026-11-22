@@ -11,7 +11,7 @@ const planPrices: Record<string, number> = {
 
 export async function POST(request: Request) {
   try {
-    // Authenticate the logged-in user
+    // Authenticate user
     const authHeader = request.headers.get("authorization");
     const token = authHeader?.replace("Bearer ", "");
 
@@ -34,7 +34,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Validate subscription plan
+    // Validate plan
     const { plan } = await request.json();
     const amount = planPrices[plan];
 
@@ -45,22 +45,41 @@ export async function POST(request: Request) {
       );
     }
 
-    // TEMPORARILY DISABLED: 10 AM–11 AM payment restriction
+    // Allow payments only from 10 AM to 11 AM IST
+    const currentTime = new Date();
 
-    // Safe Razorpay configuration diagnostics
-    console.log("Razorpay config check:", {
-      keyIdPresent: !!process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
-      keyIdPrefix: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID?.slice(0, 8),
-      secretPresent: !!process.env.RAZORPAY_KEY_SECRET,
-      secretLength: process.env.RAZORPAY_KEY_SECRET?.length,
-    });
+    const istTime = new Date(
+      currentTime.toLocaleString("en-US", {
+        timeZone: "Asia/Kolkata",
+      })
+    );
+
+    const hour = istTime.getHours();
+
+    if (hour !== 10) {
+      return NextResponse.json(
+        {
+          error:
+            "Payments are allowed only between 10:00 AM and 11:00 AM IST. Please try again during the permitted time.",
+        },
+        { status: 403 }
+      );
+    }
+
+    // Razorpay configuration
+    const keyId = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
+    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+    if (!keyId || !keySecret) {
+      throw new Error("Razorpay configuration is missing.");
+    }
 
     const razorpay = new Razorpay({
-      key_id: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!,
-      key_secret: process.env.RAZORPAY_KEY_SECRET!,
+      key_id: keyId,
+      key_secret: keySecret,
     });
 
-    // Create Razorpay order
+    // Create payment order
     const order = await razorpay.orders.create({
       amount: amount * 100,
       currency: "INR",
@@ -71,13 +90,11 @@ export async function POST(request: Request) {
       },
     });
 
-    console.log("Razorpay order created:", order.id);
-
     return NextResponse.json({
       order_id: order.id,
       amount: order.amount,
       currency: order.currency,
-      key_id: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+      key_id: keyId,
     });
   } catch (error) {
     console.error("Create order error:", error);

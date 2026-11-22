@@ -17,43 +17,83 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
 
+  const [loginTime, setLoginTime] = useState("");
+  const [browserInfo, setBrowserInfo] = useState("");
+  const [deviceInfo, setDeviceInfo] = useState("");
+
   useEffect(() => {
     const loadProfile = async () => {
-      const { data: authData } = await supabase.auth.getUser();
-      const user = authData.user;
+      try {
+        const { data: authData, error: authError } =
+          await supabase.auth.getUser();
 
-      if (!user) {
-        router.push("/login");
-        return;
+        if (authError || !authData.user) {
+          router.replace("/login");
+          return;
+        }
+
+        const user = authData.user;
+
+        setName(user.user_metadata?.full_name || "User");
+        setEmail(user.email || "");
+
+        const [pointsResult, questionsResult, answersResult] =
+          await Promise.all([
+            supabase
+              .from("user_points")
+              .select("points")
+              .eq("user_id", user.id)
+              .maybeSingle(),
+
+            supabase
+              .from("questions")
+              .select("*", { count: "exact", head: true })
+              .eq("user_id", user.id),
+
+            supabase
+              .from("answers")
+              .select("*", { count: "exact", head: true })
+              .eq("user_id", user.id),
+          ]);
+
+        setPoints(pointsResult.data?.points ?? 0);
+        setQuestions(questionsResult.count ?? 0);
+        setAnswers(answersResult.count ?? 0);
+
+        setLoginTime(
+          new Date().toLocaleString("en-IN", {
+            dateStyle: "medium",
+            timeStyle: "short",
+            timeZone: "Asia/Kolkata",
+          })
+        );
+
+        const ua = navigator.userAgent;
+
+        let browser = "Unknown browser";
+
+        if (ua.includes("Edg/")) {
+          browser = "Microsoft Edge";
+        } else if (ua.includes("Chrome/")) {
+          browser = "Google Chrome";
+        } else if (ua.includes("Firefox/")) {
+          browser = "Mozilla Firefox";
+        } else if (ua.includes("Safari/")) {
+          browser = "Safari";
+        }
+
+        setBrowserInfo(browser);
+
+        setDeviceInfo(
+          /Mobi|Android|iPhone|iPad/i.test(ua)
+            ? "Mobile"
+            : "Desktop / Other"
+        );
+      } catch (error) {
+        console.error("Profile loading error:", error);
+      } finally {
+        setLoading(false);
       }
-
-      setName(user.user_metadata?.full_name || "User");
-      setEmail(user.email || "");
-
-      const [pointsResult, questionsResult, answersResult] =
-        await Promise.all([
-          supabase
-            .from("user_points")
-            .select("points")
-            .eq("user_id", user.id)
-            .maybeSingle(),
-
-          supabase
-            .from("questions")
-            .select("*", { count: "exact", head: true })
-            .eq("user_id", user.id),
-
-          supabase
-            .from("answers")
-            .select("*", { count: "exact", head: true })
-            .eq("user_id", user.id),
-        ]);
-
-      setPoints(pointsResult.data?.points ?? 0);
-      setQuestions(questionsResult.count ?? 0);
-      setAnswers(answersResult.count ?? 0);
-
-      setLoading(false);
     };
 
     loadProfile();
@@ -80,7 +120,6 @@ export default function ProfilePage() {
   return (
     <div className="min-h-screen bg-gray-100 p-6">
       <div className="max-w-2xl mx-auto bg-white rounded-xl shadow-md p-8">
-
         <h1 className="text-3xl font-bold text-orange-600 text-center">
           My Profile
         </h1>
@@ -95,7 +134,6 @@ export default function ProfilePage() {
         </div>
 
         <div className="grid grid-cols-2 gap-4 mt-8">
-
           <div className="bg-orange-50 rounded-lg p-5 text-center">
             <h3 className="text-gray-600">Total Points</h3>
             <p className="text-3xl font-bold text-orange-600">{points}</p>
@@ -115,7 +153,36 @@ export default function ProfilePage() {
             <h3 className="text-gray-600">Account Status</h3>
             <p className="text-xl font-bold text-purple-600">Active</p>
           </div>
+        </div>
 
+        <div className="mt-8 border rounded-lg p-5">
+          <h2 className="text-xl font-bold text-gray-800">
+            Login History
+          </h2>
+
+          <p className="text-sm text-gray-500 mt-2">
+            Current session information
+          </p>
+
+          <div className="mt-4 space-y-2 text-gray-700">
+            <p>
+              <strong>Login time:</strong> {loginTime || "Unavailable"}
+            </p>
+
+            <p>
+              <strong>Browser:</strong> {browserInfo || "Unavailable"}
+            </p>
+
+            <p>
+              <strong>Device:</strong> {deviceInfo || "Unavailable"}
+            </p>
+
+            <p className="text-xs text-gray-500 pt-2">
+              This displays information about the current session only.
+              Historical login records, operating system details and IP
+              address tracking are not connected yet.
+            </p>
+          </div>
         </div>
 
         <div className="mt-8 space-y-3">
@@ -148,7 +215,6 @@ export default function ProfilePage() {
             {loggingOut ? "Logging out..." : "Logout"}
           </button>
         </div>
-
       </div>
     </div>
   );

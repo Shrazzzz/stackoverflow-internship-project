@@ -11,6 +11,18 @@ const planPrices: Record<string, number> = {
   Gold: 1000,
 };
 
+function isPaymentTimeAllowed() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+
+  const hour = Number(parts.find((p) => p.type === "hour")?.value);
+  return hour === 10;
+}
+
 export async function POST(request: Request) {
   try {
     const token = request.headers
@@ -101,6 +113,17 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "Payment details could not be verified." },
         { status: 400 }
+      );
+    }
+
+    // Check permitted payment time before activating subscription
+    if (!isPaymentTimeAllowed()) {
+      return NextResponse.json(
+        {
+          error:
+            "Payment verification is allowed only between 10:00 AM and 11:00 AM IST. Contact support if your payment was already captured.",
+        },
+        { status: 403 }
       );
     }
 
